@@ -363,13 +363,13 @@ jobs:
           echo "Final release contents:"
           ls -la final-apks/
 
-          # 4. Recreate the release so its date changes (Obtainium can use that as the version)
+          # 4. Recreate the release with a fixed title and notes
           gh release delete "$TAG" --cleanup-tag --yes || true
           gh release create "$TAG" final-apks/* \
-            --title "Morphe APKs - $(date -u +'%Y-%m-%d %H:%M')" \
-            --notes "Morphe APKs - auto built. Updated $(date -u +'%Y-%m-%d %H:%M') UTC." \
+            --title "release-morphe" \
+            --notes "Auto built Morphe APKs." \
             --latest
-
+            
       - name: Verify GitHub Release
         if: steps.check-apks.outputs.skip_release == 'false'
         env:
