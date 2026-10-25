@@ -7,6 +7,10 @@
     {
       "app_name": "youtube-music",
       "source": "morphe"
+    },
+    {
+      "app_name": "windscribe",
+      "source": "rushiranpise-dev"
     }
   ]
 }
