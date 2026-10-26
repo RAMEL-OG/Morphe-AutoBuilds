@@ -43,5 +43,10 @@
     "app_name": "windscribe",
     "source": "rushiranpise-dev",
     "arches": ["universal"]
+  },
+  {
+    "app_name": "lightroom",
+    "source": "Hoo",
+    "arches": ["arm64-v8a"]
   }
 ]
