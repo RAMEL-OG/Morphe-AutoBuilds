@@ -15,7 +15,7 @@ on:
         description: 'Source name (from sources/ folder)'
         required: true
         type: string
-        default: 'revanced'
+        default: 'morphe'
       version:
         description: 'Specific version (leave empty for latest)'
         required: false
@@ -29,7 +29,7 @@ on:
           - arm64-v8a
           - armeabi-v7a
           - universal
-        default: 'universal'
+        default: 'arm64-v8a'
       replace_in_release:
         description: 'Replace APK in existing release'
         required: true
@@ -135,44 +135,65 @@ jobs:
         with:
           name: manual-apk-${{ inputs.app_name }}-${{ inputs.architecture }}
           path: "*.apk"
-      
-      - name: Install Publisher Dependencies
-        if: ${{ inputs.replace_in_release == true }}
-        run: pip install requests
 
-      - name: Publish to GitLab Releases
+      - name: Publish to GitHub Release
         if: ${{ inputs.replace_in_release == true }}
         env:
-          GITLAB_TOKEN: ${{ secrets.GITLAB_TOKEN }}
-          GITLAB_PROJECT_ID: "87288318"
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
         run: |
-          if [ -z "$GITLAB_TOKEN" ]; then
-            echo "GITLAB_TOKEN secret is not set on this repo."
-            exit 1
+          set -euo pipefail
+          TAG="latest"
+          mkdir -p new-apks old-apks final-apks
+
+          cp -f *.apk new-apks/
+
+          # 1. Pull down everything from the current release so other apps carry over
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Downloading existing release assets for carry-over..."
+            gh release download "$TAG" --dir old-apks || true
           fi
-          mkdir -p ./release-apks
-          cp -f *.apk ./release-apks/ 2>/dev/null || true
-          python scripts/gitlab_publish_release.py \
-            --apks-dir ./release-apks \
-            --merge
 
-      - name: Verify GitLab Release Health
-        if: always() && ${{ inputs.replace_in_release == true }}
+          # 2. Newly built APKs win
+          cp new-apks/*.apk final-apks/
+
+          # 3. Keep an old APK only if no new APK exists for the same app/arch
+          #    (file name stem = everything before "-v<digit>")
+          for old in old-apks/*.apk; do
+            [ -e "$old" ] || continue
+            name=$(basename "$old")
+            stem="${name%%-v[0-9]*}"
+            if ! ls final-apks/ | grep -q "^${stem}-v[0-9]"; then
+              cp "$old" final-apks/
+            fi
+          done
+
+          # 4. Keep the existing manifest.json unchanged
+          if [ -f old-apks/manifest.json ]; then
+            cp old-apks/manifest.json final-apks/manifest.json
+          fi
+
+          echo "Final release contents:"
+          ls -la final-apks/
+
+          # 5. Recreate the release with a fixed title and notes
+          gh release delete "$TAG" --cleanup-tag --yes || true
+          gh release create "$TAG" final-apks/* \
+            --title "release-morphe" \
+            --notes "Auto built Morphe APKs." \
+            --latest
+
+      - name: Verify GitHub Release
+        if: ${{ inputs.replace_in_release == true }}
         env:
-          GITLAB_TOKEN: ${{ secrets.GITLAB_TOKEN }}
-          GITLAB_PROJECT_ID: "87288318"
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
         run: |
-          # Safety net for the 2026-10-09 / 2026-10-22 failure mode: if the
-          # publish step died after the tag move, GitLab is left with the tag
-          # but zero releases, and the store shows every patched app as
-          # unavailable. Verify health; on failure run the proven
-          # --rebuild-links recovery once, then fail loudly if still broken.
-          if python scripts/gitlab_publish_release.py --verify-only --tag latest; then
-            echo "GitLab release verified healthy."
-          else
-            echo "Release unhealthy; running automatic recovery..."
-            python scripts/gitlab_publish_release.py --rebuild-links --tag latest
-            python scripts/gitlab_publish_release.py --verify-only --tag latest
+          count=$(gh release view latest --json assets --jq '.assets | length')
+          echo "Assets on release: $count"
+          if [ "$count" -eq 0 ]; then
+            echo "Release has no assets; failing."
+            exit 1
           fi
 
       - name: Publish Summary
